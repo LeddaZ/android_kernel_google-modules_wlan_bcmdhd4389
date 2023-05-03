@@ -1,7 +1,7 @@
 /*
  * DHD debugability Linux os layer
  *
- * Copyright (C) 2021, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -150,14 +150,14 @@ dbg_ring_poll_worker(struct work_struct *work)
 	}
 
 	if (!CAN_SLEEP()) {
-		DHD_ERROR(("this context should be sleepable\n"));
+		DHD_CONS_ONLY(("this context should be sleepable\n"));
 		sched = FALSE;
 		goto exit;
 	}
 
 	buf = VMALLOCZ(dhdp->osh, buflen);
 	if (!buf) {
-		DHD_ERROR(("%s failed to allocate read buf\n", __FUNCTION__));
+		DHD_CONS_ONLY(("%s failed to allocate read buf\n", __FUNCTION__));
 		sched = FALSE;
 		goto exit;
 	}
@@ -182,7 +182,7 @@ dbg_ring_poll_worker(struct work_struct *work)
 				DHD_DBGIF(("%s READ/WRITE counter mismatched!\n", __FUNCTION__));
 				ring->stat.read_bytes = ring->stat.written_bytes;
 			}
-			DHD_INFO(("%s RING%d[%s]read_bytes %d, written_bytes %d, "
+			DHD_DBGIF(("%s RING%d[%s]read_bytes %d, written_bytes %d, "
 				"writen_records %d\n", __FUNCTION__, ring->id, ring->name,
 				ring->stat.read_bytes, ring->stat.written_bytes,
 				ring->stat.written_records));
@@ -257,8 +257,9 @@ dhd_os_start_logging(dhd_pub_t *dhdp, char *ring_name, int log_level,
 	if (!VALID_RING(ring_id))
 		return BCME_UNSUPPORTED;
 
-	DHD_LOG_MEM(("%s , log_level : %d, time_intval : %d, threshod %d Bytes\n",
-		__FUNCTION__, log_level, time_intval, threshold));
+	DHD_ERROR(("%s , ring_id : %d log_level : %d, "
+			"time_intval : %d, threshod %d Bytes\n",
+			__FUNCTION__, ring_id, log_level, time_intval, threshold));
 
 	/* change the configuration */
 	ret = dhd_dbg_set_configuration(dhdp, ring_id, log_level, flags, threshold);
@@ -300,8 +301,6 @@ dhd_os_reset_logging(dhd_pub_t *dhdp)
 		DHD_INFO(("%s: Stop ring buffer %d\n", __FUNCTION__, ring_id));
 
 		ring_info = &os_priv[ring_id];
-		/* cancel any pending work */
-		cancel_delayed_work_sync(&ring_info->work);
 		/* log level zero makes stop logging on that ring */
 		ring_info->log_level = 0;
 		ring_info->interval = 0;
@@ -311,6 +310,8 @@ dhd_os_reset_logging(dhd_pub_t *dhdp)
 			DHD_ERROR(("dhd_set_configuration is failed : %d\n", ret));
 			return ret;
 		}
+		/* cancel any pending work */
+		cancel_delayed_work_sync(&ring_info->work);
 	}
 	return ret;
 }
@@ -541,9 +542,12 @@ dhd_os_dbg_attach(dhd_pub_t *dhdp)
 	int ring_id;
 
 	/* os_dbg data */
-	os_priv = MALLOCZ(dhdp->osh, sizeof(*os_priv) * DEBUG_RING_ID_MAX);
-	if (!os_priv)
+	os_priv = VMALLOCZ(dhdp->osh, sizeof(*os_priv) * DEBUG_RING_ID_MAX);
+	if (!os_priv) {
+		DHD_ERROR(("%s:%d: VMALLOC failed for os_priv, size %d\n", __FUNCTION__,
+			__LINE__, (uint32)sizeof(*os_priv) * DEBUG_RING_ID_MAX));
 		return BCME_NOMEM;
+	}
 
 	for (ring_id = DEBUG_RING_ID_INVALID + 1; ring_id < DEBUG_RING_ID_MAX;
 	     ring_id++) {
@@ -554,8 +558,9 @@ dhd_os_dbg_attach(dhd_pub_t *dhdp)
 	}
 
 	ret = dhd_dbg_attach(dhdp, dhd_os_dbg_pullreq, dhd_os_dbg_urgent_notifier, os_priv);
-	if (ret)
-		MFREE(dhdp->osh, os_priv, sizeof(*os_priv) * DEBUG_RING_ID_MAX);
+	if (ret) {
+		VMFREE(dhdp->osh, os_priv, sizeof(*os_priv) * DEBUG_RING_ID_MAX);
+	}
 
 	return ret;
 }
@@ -577,7 +582,7 @@ dhd_os_dbg_detach(dhd_pub_t *dhdp)
 			cancel_delayed_work_sync(&ring_info->work);
 		}
 	}
-	MFREE(dhdp->osh, os_priv, sizeof(*os_priv) * DEBUG_RING_ID_MAX);
+	VMFREE(dhdp->osh, os_priv, sizeof(*os_priv) * DEBUG_RING_ID_MAX);
 
 	return dhd_dbg_detach(dhdp);
 }

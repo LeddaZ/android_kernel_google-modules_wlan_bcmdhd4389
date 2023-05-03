@@ -1,5 +1,5 @@
 #
-# Copyright (C) 2021, Broadcom.
+# Copyright (C) 2022, Broadcom.
 #
 #      Unless you and Broadcom execute a separate written software license
 # agreement governing use of this software, this software is licensed to you
@@ -25,7 +25,7 @@ M ?= $(shell pwd)
 
 ifneq ($(KERNEL_SRC),)
  KBUILD_OPTIONS += BCMDHD_ROOT=$(shell cd $(KERNEL_SRC); readlink -e $(M))
- include $(KERNEL_SRC)/../gs/google-modules/soc-modules/Makefile.include
+ include $(KERNEL_SRC)/../private/google-modules/soc/gs/Makefile.include
  EXTRA_CFLAGS+="-Wno-missing-prototypes"
 endif
 

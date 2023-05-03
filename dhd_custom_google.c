@@ -1,7 +1,7 @@
 /*
  * Platform Dependent file for Hikey
  *
- * Copyright (C) 2021, Broadcom.
+ * Copyright (C) 2022, Broadcom.
  *
  *      Unless you and Broadcom execute a separate written software license
  * agreement governing use of this software, this software is licensed to you
@@ -141,6 +141,33 @@ dhd_set_coredump(const char *buf, int buf_len, const char *info)
 #define WIFI_MAC "wlan_mac1"
 static u8 wlan_mac[6] = {0};
 
+typedef struct {
+    char hw_id[MAX_HW_INFO_LEN];
+    char sku[MAX_HW_INFO_LEN];
+} sku_info_t;
+
+sku_info_t sku_table[] = {
+	{ {"G9S9B"}, {"MMW"} },
+	{ {"G8V0U"}, {"MMW"} },
+	{ {"GFQM1"}, {"MMW"} },
+	{ {"GB62Z"}, {"MMW"} },
+	{ {"GE2AE"}, {"MMW"} },
+	{ {"GQML3"}, {"MMW"} },
+	{ {"GB7N6"}, {"ROW"} },
+	{ {"GLU0G"}, {"ROW"} },
+	{ {"GNA8F"}, {"ROW"} },
+	{ {"GX7AS"}, {"ROW"} },
+	{ {"GP4BC"}, {"ROW"} },
+	{ {"GVU6C"}, {"ROW"} },
+	{ {"GR1YH"}, {"JPN"} },
+	{ {"GF5KQ"}, {"JPN"} },
+	{ {"GPQ72"}, {"JPN"} },
+	{ {"GB17L"}, {"JPN"} },
+	{ {"GFE4J"}, {"JPN"} },
+	{ {"G03Z5"}, {"JPN"} },
+	{ {"G1AZG"}, {"EU"} }
+};
+
 static int
 dhd_wlan_get_mac_addr(unsigned char *buf)
 {
@@ -211,10 +238,14 @@ dhd_wlan_init_mac_addr(void)
 
 #if defined(SUPPORT_MULTIPLE_NVRAM) || defined(SUPPORT_MULTIPLE_CLMBLOB)
 enum {
-	REV_SKU = 0,
-	REV_ONLY = 1,
-	SKU_ONLY = 2,
-	NO_EXT_NAME = 3
+	CHIP_REV_SKU = 0,
+	CHIP_REV = 1,
+	CHIP_SKU = 2,
+	CHIP = 3,
+	REV_SKU = 4,
+	REV_ONLY = 5,
+	SKU_ONLY = 6,
+	NO_EXT_NAME = 7
 };
 
 #define PLT_PATH "/chosen/plat"
@@ -251,21 +282,50 @@ dhd_set_platform_ext_name(char *hw_rev, char* hw_sku)
 {
 	bzero(&platform_hw_info, sizeof(platform_hw_info_t));
 
-	if (strncmp (hw_rev, "NA", MAX_HW_INFO_LEN) != 0) {
-		snprintf(platform_hw_info.ext_name[REV_SKU], MAX_HW_EXT_LEN, "_%s_%s",
-			hw_rev, hw_sku);
-		setbit(&platform_hw_info.avail_bmap, REV_SKU);
-
+	if (strncmp(hw_rev, "NA", MAX_HW_INFO_LEN) != 0) {
+		if (strncmp(hw_sku, "NA", MAX_HW_INFO_LEN) != 0) {
+			snprintf(platform_hw_info.ext_name[REV_SKU], MAX_HW_EXT_LEN, "_%s_%s",
+				hw_rev, hw_sku);
+			setbit(&platform_hw_info.avail_bmap, REV_SKU);
+		}
 		snprintf(platform_hw_info.ext_name[REV_ONLY], MAX_HW_EXT_LEN, "_%s", hw_rev);
 		setbit(&platform_hw_info.avail_bmap, REV_ONLY);
 	}
 
-	snprintf(platform_hw_info.ext_name[SKU_ONLY], MAX_HW_EXT_LEN, "_%s", hw_sku);
-	setbit(&platform_hw_info.avail_bmap, SKU_ONLY);
+	if (strncmp(hw_sku, "NA", MAX_HW_INFO_LEN) != 0) {
+		snprintf(platform_hw_info.ext_name[SKU_ONLY], MAX_HW_EXT_LEN, "_%s", hw_sku);
+		setbit(&platform_hw_info.avail_bmap, SKU_ONLY);
+	}
 
 #ifdef USE_CID_CHECK
 	setbit(&platform_hw_info.avail_bmap, NO_EXT_NAME);
 #endif /* USE_CID_CHECK */
+
+	return;
+}
+
+void
+dhd_set_platform_ext_name_for_chip_version(char* chip_version)
+{
+	if (strncmp(val_revision, "NA", MAX_HW_INFO_LEN) != 0) {
+		if (strncmp(val_sku, "NA", MAX_HW_INFO_LEN) != 0) {
+			snprintf(platform_hw_info.ext_name[CHIP_REV_SKU], MAX_HW_EXT_LEN,
+				"%s_%s_%s", chip_version, val_revision, val_sku);
+			setbit(&platform_hw_info.avail_bmap, CHIP_REV_SKU);
+		}
+
+		snprintf(platform_hw_info.ext_name[CHIP_REV], MAX_HW_EXT_LEN, "%s_%s",
+			chip_version, val_revision);
+		setbit(&platform_hw_info.avail_bmap, CHIP_REV);
+	}
+	if (strncmp(val_sku, "NA", MAX_HW_INFO_LEN) != 0) {
+		snprintf(platform_hw_info.ext_name[CHIP_SKU], MAX_HW_EXT_LEN, "%s_%s",
+			chip_version, val_sku);
+		setbit(&platform_hw_info.avail_bmap, CHIP_SKU);
+	}
+
+	snprintf(platform_hw_info.ext_name[CHIP], MAX_HW_EXT_LEN, "%s", chip_version);
+	setbit(&platform_hw_info.avail_bmap, CHIP);
 
 	return;
 }
@@ -366,6 +426,7 @@ dhd_wlan_init_hardware_info(void)
 	int hw_stage = -1;
 	int hw_major = -1;
 	int hw_minor = -1;
+	int i;
 
 	node = of_find_node_by_path(PLT_PATH);
 	if (!node) {
@@ -430,21 +491,13 @@ dhd_wlan_init_hardware_info(void)
 			goto exit;
 		}
 
-		if (strcmp(hw_sku, "G9S9B") == 0 ||
-			strcmp(hw_sku, "G8V0U") == 0 ||
-			strcmp(hw_sku, "GFQM1") == 0) {
-			strcpy(val_sku, "MMW");
-		} else if (strcmp(hw_sku, "GR1YH") == 0 ||
-			strcmp(hw_sku, "GF5KQ") == 0 ||
-			strcmp(hw_sku, "GPQ72") == 0) {
-			strcpy(val_sku, "JPN");
-		} else if (strcmp(hw_sku, "GB7N6") == 0 ||
-			strcmp(hw_sku, "GLU0G") == 0 ||
-			strcmp(hw_sku, "GNA8F") == 0) {
-			strcpy(val_sku, "ROW");
-		} else {
-			strcpy(val_sku, "NA");
+		for (i = 0; i < ARRAYSIZE(sku_table); i ++) {
+			if (strcmp(hw_sku, sku_table[i].hw_id) == 0) {
+				strcpy(val_sku, sku_table[i].sku);
+				break;
+			}
 		}
+		DHD_ERROR(("%s: hw_sku is %s, val_sku is %s\n", __FUNCTION__, hw_sku, val_sku));
 	}
 
 exit:
@@ -477,15 +530,6 @@ dhd_wifi_init_gpio(void)
 	/* ========== WLAN_PWR_EN ============ */
 	DHD_INFO(("%s: gpio_wlan_power : %d\n", __FUNCTION__, wlan_reg_on));
 
-#ifdef EXYNOS_PCIE_RC_ONOFF
-	if (of_property_read_u32(root_node, "ch-num", &pcie_ch_num)) {
-		DHD_INFO(("%s: Failed to parse the channel number\n", __FUNCTION__));
-		return -EINVAL;
-	}
-	/* ========== WLAN_PCIE_NUM ============ */
-	DHD_INFO(("%s: pcie_ch_num : %d\n", __FUNCTION__, pcie_ch_num));
-#endif /* EXYNOS_PCIE_RC_ONOFF */
-
 	/*
 	 * For reg_on, gpio_request will fail if the gpio is configured to output-high
 	 * in the dts using gpio-hog, so do not return error for failure.
@@ -515,12 +559,7 @@ dhd_wifi_init_gpio(void)
 
 	/* Wait for WIFI_TURNON_DELAY due to power stability */
 	msleep(WIFI_TURNON_DELAY);
-#ifdef EXYNOS_PCIE_RC_ONOFF
-	if (exynos_pcie_pm_resume(pcie_ch_num)) {
-		WARN(1, "pcie link up failure\n");
-		return -ENODEV;
-	}
-#endif /* EXYNOS_PCIE_RC_ONOFF */
+
 #ifdef CONFIG_BCMDHD_OOB_HOST_WAKE
 	/* ========== WLAN_HOST_WAKE ============ */
 	wlan_host_wake_up = of_get_named_gpio(root_node,
@@ -591,6 +630,29 @@ dhd_wlan_reset(int onoff)
 static int
 dhd_wlan_set_carddetect(int val)
 {
+#ifdef EXYNOS_PCIE_RC_ONOFF
+	struct device_node *root_node = NULL;
+	char *wlan_node = DHD_DT_COMPAT_ENTRY;
+
+	root_node = of_find_compatible_node(NULL, NULL, wlan_node);
+	if (!root_node) {
+		DHD_ERROR(("failed to get device node of BRCM WLAN\n"));
+		return -ENODEV;
+	}
+
+	if (of_property_read_u32(root_node, "ch-num", &pcie_ch_num)) {
+		DHD_INFO(("%s: Failed to parse the channel number\n", __FUNCTION__));
+		return -EINVAL;
+	}
+	/* ========== WLAN_PCIE_NUM ============ */
+	DHD_INFO(("%s: pcie_ch_num : %d\n", __FUNCTION__, pcie_ch_num));
+#endif /* EXYNOS_PCIE_RC_ONOFF */
+
+	if (val) {
+		exynos_pcie_pm_resume(pcie_ch_num);
+	} else {
+		printk(KERN_INFO "%s Ignore carddetect: %d\n", __FUNCTION__, val);
+	}
 	return 0;
 }
 
@@ -644,7 +706,11 @@ int dhd_plat_pcie_register_event(void *plat_info, struct pci_dev *pdev, dhd_pcie
 		}
 		g_pfn = pfn;
 		p->pdev = pdev;
+#ifdef CPL_TIMEOUT_RECOVERY
+		p->pcie_event.events = EXYNOS_PCIE_EVENT_LINKDOWN | EXYNOS_PCIE_EVENT_CPL_TIMEOUT;
+#else
 		p->pcie_event.events = EXYNOS_PCIE_EVENT_LINKDOWN;
+#endif /* CPL_TIMEOUT_RECOVERY */
 		p->pcie_event.user = pdev;
 		p->pcie_event.mode = EXYNOS_PCIE_TRIGGER_CALLBACK;
 		p->pcie_event.callback = plat_pcie_notify_cb;
@@ -892,6 +958,7 @@ int dhd_plat_pcie_resume(void *plat_info)
 {
 	int ret = 0;
 	ret = exynos_pcie_pm_resume(pcie_ch_num);
+	is_irq_on_big_core = true;
 	return ret;
 }
 
